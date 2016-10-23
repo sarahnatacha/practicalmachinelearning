@@ -1,0 +1,119 @@
+---
+title: "Practical Machine Learning"
+author: "SarahNatacha"
+date: "October 23, 2016"
+output:
+  html_document: default
+  pdf_document:
+    fig_height: 10
+    fig_width: 10
+---
+
+## Get and Clean Data  
+In this project, we are using data from the accelerometers on the belt, forearm, arm, and dumbell of six participants to predict how well they did the exercise.  
+```{r, cache = T}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+### Import the Data from the URLs and read it into the variables
+```{r, cache = T }
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainCSV <- "./pml-training.csv"
+testCSV  <- "./pml-testing.csv"
+if (!file.exists(trainCSV)) {
+  download.file(trainUrl, destfile=trainingFile, method="curl")
+}
+if (!file.exists(testCSV)) {
+  download.file(testUrl, destfile=testFile, method="curl")
+}
+```  
+### Load the Data locally
+```{r, cache = T}
+training <- read.csv(trainCSV, na.strings = c("NA", ""))
+testing <- read.csv(testCSV, na.strings = c("NA", ""))
+
+```
+
+The training dataset has 19622 observations and 160 variables, and the testing data set contains 20 observations and the same variables as the training set. We are trying to predict the outcome of the variable classe in the training set.
+
+### Data cleaning
+We now delete columns of the training set that contain any missing values.
+
+```{r, cache = T}
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+```
+
+
+We now remove columns that do not contribute to the accelerometer measurements.
+```{r, cache = T}
+classe <- training$classe
+trainRemoved <- grepl("^X|timestamp|window", names(training))
+training <- training[, !trainRemoved]
+trainCleaned <- training[, sapply(training, is.numeric)]
+trainCleaned$classe <- classe
+
+testRemoved <- grepl("^X|timestamp|window", names(testing))
+testing <- testing[, !testRemoved]
+testCleaned <- testing[, sapply(testing, is.numeric)]
+```
+
+### Data spliting
+In order to get out-of-sample errors, we split the cleaned training set trainCleaned into a training set (trainData, 70%) for prediction and a validation set (validData 30%).
+The validation dataset will be used to conduct cross validation before the testing dataset.  
+
+```{r, cache = T}
+set.seed(22519) 
+inTrain <- createDataPartition(trainCleaned$classe, p=0.7, list=FALSE)
+trainData <- trainCleaned[inTrain, ]
+validData <- trainCleaned[-inTrain, ]
+```
+
+## Data Modeling
+We use the method **Random Forest** algorithm to predict the outcome as it automatically selects important variables and it is robust to correlated covariates and outliers. 
+
+```{r, cache = T}
+control_rf <- trainControl(method="cv", number=5)
+model_rf <- train(classe ~ ., data=trainData, method="rf", trControl=control_rf, ntree=250)
+print(model_rf, digits = 4)
+```
+
+We estimate the performance of the model on the validation dataset.  
+
+```{r, cache = T}
+predict_rf <- predict(model_rf, validData)
+conf_rf <- confusionMatrix(validData$classe, predict_rf)
+
+accuracy <- postResample(predict_rf, validData$classe)
+print(accuracy)
+err <- 1 - as.numeric(conf_rf$overall[1])
+print(err)
+```
+
+The accuracy rate is 0.992, and so the out-of-sample error rate is 0.0079.This may be due to the fact that many predictors are highly correlated. Random forests chooses a subset of predictors at each split and decorrelate the trees. This leads to high accuracy, 
+
+## Predicting on Test Dataset
+We now use random forests to predict the outcome variable classe for the testing set.
+
+```{r, cache = T}
+result <- predict(model_rf, testCleaned[, -length(names(testCleaned))])
+print(result)
+```  
+
+## Figures
+Decision Tree Visualization
+```{r, cache = T}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
+Matrix Visualization of Correlation  
+```{r, cache = T}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method="color")
+```
